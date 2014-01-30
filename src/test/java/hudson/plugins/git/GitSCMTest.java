@@ -951,7 +951,7 @@ public class GitSCMTest extends AbstractGitTestCase {
         FreeStyleProject p = createFreeStyleProject();
         GitSCM scm = new GitSCM("https://github.com/jenkinsci/jenkins");
         p.setScm(scm);
-        configRoundtrip(p);
+        configRoundtrip((Item) p);
         assertEqualDataBoundBeans(scm,p.getScm());
     }
 
