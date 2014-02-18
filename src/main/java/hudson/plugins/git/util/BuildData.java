@@ -13,6 +13,7 @@ import hudson.plugins.git.Revision;
 import hudson.plugins.git.GitSCM;
 import hudson.plugins.git.UserRemoteConfig;
 import hudson.plugins.git.GitSCM.BuildsBySourceMapper;
+import hudson.util.XStream2;
 
 import org.apache.commons.lang.StringUtils;
 import org.eclipse.jgit.lib.ObjectId;
@@ -22,8 +23,9 @@ import org.kohsuke.stapler.export.ExportedBean;
 import java.io.Serializable;
 import java.util.*;
 
+import jenkins.model.Jenkins;
 import static hudson.Util.fixNull;
-import static hudson.init.InitMilestone.JOB_LOADED;
+import static hudson.init.InitMilestone.PLUGINS_STARTED;
 
 /**
  * Captures the Git related information for a build.
@@ -350,7 +352,7 @@ public class BuildData implements RunAction, Serializable, Cloneable {
             clone.projectName = projectName;
         }
         
-        clone.lastBuild = this.lastBuild.clone();
+        clone.lastBuild = (this.lastBuild == null) ? null : this.lastBuild.clone();
         
         clone.remoteUrls = new HashSet<String>();
         
@@ -392,10 +394,13 @@ public class BuildData implements RunAction, Serializable, Cloneable {
      * @see GitSCM#buildsMapper
      * @see GitSCM.BuildsBySourceMapper
      */
-    @Initializer(before=JOB_LOADED)
+    @Initializer(before=PLUGINS_STARTED)
     public static void configureXtream() {
         //Making sure that XStream does not save this field to disk; it shall
         //only be serialised over the network; but not saved to disk!
-        Items.XSTREAM.omitField(BuildData.class, "localBuildsMapperLink");
+        XStream2[] streams = { Run.XSTREAM2, Items.XSTREAM2, Jenkins.XSTREAM2 };
+        for (XStream2 x : streams) {
+            x.omitField(BuildData.class, "localBuildsMapperLink");
+        }
     }
 }
