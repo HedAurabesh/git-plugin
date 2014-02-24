@@ -197,7 +197,7 @@ public class BuildData implements RunAction, Serializable, Cloneable {
         lastBuild = build;
         if (!StringUtils.isEmpty(this.projectName)) {
             for(Branch branch : build.marked.getBranches()) {
-                localBuildsMapperLink.addBranchToBuildMap(
+                getLocalBuildMapperLink().addBranchToBuildMap(
                         this.projectName, fixNull(branch.getName()), build
                 );
             }

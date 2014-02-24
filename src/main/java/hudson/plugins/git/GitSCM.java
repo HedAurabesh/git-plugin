@@ -133,6 +133,7 @@ public class GitSCM extends GitSCMBackwardCompatibility {
         private final transient File dataFile;
         private final transient ReentrantReadWriteLock dataFileLock =
                 new ReentrantReadWriteLock();
+        private transient Long lastDataFileDump;
         
         /**
          * Map that maps: (project-name TO (branch-name TO latest-build)
@@ -218,8 +219,21 @@ public class GitSCM extends GitSCMBackwardCompatibility {
             if (BulkChange.contains(this)) {
                 return;
             }
-            this.dataFileLock.writeLock().lock();
+            
+            boolean hasLock = this.dataFileLock.writeLock().tryLock();
+            if (!hasLock) {
+                //Somebody else is currently writing out data; we don't update
+                return;
+            }
             try {
+                //Try not writing the file too often. Once every 10 secs ought to be enough
+                if (this.lastDataFileDump != null) {
+                    long delta = System.currentTimeMillis() - this.lastDataFileDump;
+                    if (delta < 10*1000) {
+                        //No save
+                        return;
+                    }
+                }
                 //Creating the configuration XML-File to serialise ourselves into
                 GZIPOutputStream gzos = null;
                 try {
@@ -232,6 +246,7 @@ public class GitSCM extends GitSCMBackwardCompatibility {
                         gzos.close();
                     }
                 }
+                this.lastDataFileDump = System.currentTimeMillis();
             } catch (IOException ex) {
                 LOGGER.log(
                     Level.WARNING,
