@@ -1,14 +1,19 @@
 package hudson.plugins.git.util;
 
+import hudson.Extension;
 import hudson.Functions;
 import hudson.init.Initializer;
 import hudson.model.AbstractBuild;
+import hudson.model.Item;
 import hudson.model.RunAction;
 import hudson.model.Api;
 import hudson.model.Items;
 import hudson.model.Job;
 import hudson.model.Run;
+import hudson.model.listeners.ItemListener;
 import hudson.plugins.git.Branch;
+import hudson.plugins.git.ObjectIdConverter;
+import hudson.plugins.git.RemoteConfigConverter;
 import hudson.plugins.git.Revision;
 import hudson.plugins.git.GitSCM;
 import hudson.plugins.git.UserRemoteConfig;
@@ -17,10 +22,12 @@ import hudson.util.XStream2;
 
 import org.apache.commons.lang.StringUtils;
 import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.transport.RemoteConfig;
 import org.kohsuke.stapler.export.Exported;
 import org.kohsuke.stapler.export.ExportedBean;
 
 import java.io.Serializable;
+import java.lang.ref.WeakReference;
 import java.util.*;
 
 import jenkins.model.Jenkins;
@@ -37,7 +44,7 @@ import static hudson.init.InitMilestone.PLUGINS_STARTED;
 @ExportedBean(defaultVisibility = 999)
 public class BuildData implements RunAction, Serializable, Cloneable {
     private static final long serialVersionUID = 1L;
-
+    
     /**
      * Map of branch name -> build (Branch name to last built SHA1).
      *
@@ -117,8 +124,11 @@ public class BuildData implements RunAction, Serializable, Cloneable {
      * 1.4.1. This
      * 
      * @since 1.4.1
+     * @deprecated superseded by just storing the build that this data is associated with
      */
-    public String projectName;
+    private String projectName;
+    
+    private Run<?,?> parent;
     
     /**
      * The URLs that have been referenced.
@@ -132,8 +142,7 @@ public class BuildData implements RunAction, Serializable, Cloneable {
         this.scmName = scmName;
     }
 
-    public BuildData(String projectName, String scmName, Collection<UserRemoteConfig> remoteConfigs) {
-        this.projectName = projectName;
+    public BuildData(String scmName, Collection<UserRemoteConfig> remoteConfigs) {
         this.scmName = scmName;
         for(UserRemoteConfig c : remoteConfigs) {
             remoteUrls.add(c.getUrl());
@@ -154,6 +163,13 @@ public class BuildData implements RunAction, Serializable, Cloneable {
             return "Git Build Data:" + scmName;
         return "Git Build Data";
     }
+    
+    public String getProjectName() {
+        if (this.parent == null) { return null; }
+        Job<?,?> job = parent.getParent();
+        if (job == null) { return null; }
+        return job.getFullName();
+    }
 
     public String getIconFileName() {
         return Functions.getResourcePath()+"/plugin/git/icons/git-32x32.png";
@@ -168,9 +184,9 @@ public class BuildData implements RunAction, Serializable, Cloneable {
          * buildsByBranchName map. Since that map is now a global property,
          * no refresh is needed.
          */
-        if(this.remoteUrls == null)
+        if (this.remoteUrls == null) {
             this.remoteUrls = new HashSet<String>();
-
+        }
         return this;
     }
     
@@ -195,10 +211,10 @@ public class BuildData implements RunAction, Serializable, Cloneable {
 
     public void saveBuild(Build build) {
         lastBuild = build;
-        if (!StringUtils.isEmpty(this.projectName)) {
+        if (!StringUtils.isEmpty(this.getProjectName())) {
             for(Branch branch : build.marked.getBranches()) {
                 getLocalBuildMapperLink().addBranchToBuildMap(
-                        this.projectName, fixNull(branch.getName()), build
+                        this.getProjectName(), fixNull(branch.getName()), build
                 );
             }
         }
@@ -215,13 +231,7 @@ public class BuildData implements RunAction, Serializable, Cloneable {
     
     @SuppressWarnings("rawtypes")
     public void onAttached(Run run) {
-        Job<?,?> job = run.getParent();
-        if (job != null) {
-            String pName = job.getFullName();
-            if (pName != null) {
-                this.projectName = pName;
-            }
-        }
+        this.parent = run;
     }
 
     private BuildsBySourceMapper getLocalBuildMapperLink() {
@@ -282,33 +292,33 @@ public class BuildData implements RunAction, Serializable, Cloneable {
         //global map without overwriting existing entries
         if (buildsByBranchName != null) {
             //Check if we have a project<->BuildData mapping
-            if (!StringUtils.isEmpty(this.projectName)) {
+            if (!StringUtils.isEmpty(this.getProjectName())) {
                 // Get the global mapper and splice-in the correct mapping
                 if (getLocalBuildMapperLink() == null) {
                     //This should not have happened!
                     return buildsByBranchName;
                 }
                 getLocalBuildMapperLink().addAllFromBranchToBuildMap(
-                        this.projectName, buildsByBranchName, false
+                        this.getProjectName(), buildsByBranchName, false
                 );
                 //Removing the old buildsByBranchName object
                 buildsByBranchName = null;
                 //Grab the newest branch map; and splice-in ourselves if missing
                 return addOwnBranches(
-                        getLocalBuildMapperLink().getBranchToBuildMap(this.projectName)
+                        getLocalBuildMapperLink().getBranchToBuildMap(this.getProjectName())
                 );
             } else {
                 //Must wait until GitSCM.getBuildData() has set the project name
                 return buildsByBranchName;
             }
         }
-        if (StringUtils.isEmpty(this.projectName)) {
+        if (StringUtils.isEmpty(this.getProjectName())) {
             // Without a project name, we can't retrieve mappings from the
             // global object; in that case, we return an empty map
             return addOwnBranches(new HashMap<String, Build>());
         }
         return addOwnBranches(
-                getLocalBuildMapperLink().getBranchToBuildMap(this.projectName)
+                getLocalBuildMapperLink().getBranchToBuildMap(this.getProjectName())
         );
     }
 
@@ -348,10 +358,6 @@ public class BuildData implements RunAction, Serializable, Cloneable {
             throw new RuntimeException("Error cloning BuildData", e);
         }
         
-        if (!StringUtils.isEmpty(projectName)) {
-            clone.projectName = projectName;
-        }
-        
         clone.lastBuild = (this.lastBuild == null) ? null : this.lastBuild.clone();
         
         clone.remoteUrls = new HashSet<String>();
@@ -373,7 +379,7 @@ public class BuildData implements RunAction, Serializable, Cloneable {
                 "[scmName=%s, remoteUrls=%s, project=%s, buildsByBranchName=%s, lastBuild=%s]",
                 (scmName == null) ? "<null>" : scmName,
                 remoteUrls,
-                (projectName == null) ? "<null>" : projectName,
+                (this.getProjectName() == null) ? "<null>" : this.getProjectName(),
                 this.getBuildsByBranchName(),
                 lastBuild
         );
@@ -402,5 +408,10 @@ public class BuildData implements RunAction, Serializable, Cloneable {
         for (XStream2 x : streams) {
             x.omitField(BuildData.class, "localBuildsMapperLink");
         }
+        
+        //Avoid deserialization issue on lastBuild
+        Run.XSTREAM.registerConverter(new ObjectIdConverter());
+        Items.XSTREAM.registerConverter(new RemoteConfigConverter(Items.XSTREAM));
+        Items.XSTREAM.alias("org.spearce.jgit.transport.RemoteConfig", RemoteConfig.class);
     }
 }

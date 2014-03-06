@@ -372,23 +372,6 @@ public class GitSCM extends GitSCMBackwardCompatibility {
                     //Do nothing
                 }
             }
-            
-            //Now, we also need to go through all builds and correct the
-            //project-name in their stored BuildData objects
-            if (item instanceof Job<?,?>) {
-                Job<?,?> job = (Job<?,?>) item;
-                Object obj = job.getLastBuild();
-                if (obj instanceof Run<?,?>) {
-                    Run<?,?> run = (Run<?,?>) obj;
-                    while (run != null) {
-                        List<BuildData> bdLst = run.getActions(BuildData.class);
-                        if (bdLst == null) { continue; }
-                        for (BuildData bd : bdLst) {
-                            bd.projectName = newFullName;
-                        }
-                    }
-                }
-            }
         }
     
     }
@@ -929,7 +912,7 @@ public class GitSCM extends GitSCMBackwardCompatibility {
     }
 
     private BuildData fixNull(BuildData bd) {
-        return bd != null ? bd : new BuildData(null, getScmName(), getUserRemoteConfigs()) /*dummy*/;
+        return bd != null ? bd : new BuildData(getScmName(), getUserRemoteConfigs()) /*dummy*/;
     }
 
     /**
@@ -1187,14 +1170,6 @@ public class GitSCM extends GitSCMBackwardCompatibility {
 
         BuildData previousBuildData = getBuildData(build.getPreviousBuild());   // read only
         BuildData buildData = copyBuildData(build.getPreviousBuild());
-        
-        //Check if we need to assign a project name to a freshly minted build
-        Job<?,?> project = build.getParent();
-        if (project != null) {
-            if (StringUtils.isEmpty(buildData.projectName)) {
-                buildData.projectName = projectFullName;
-            }
-        }
         
         build.addAction(buildData);
         if (VERBOSE && buildData.lastBuild != null) {
@@ -1640,7 +1615,7 @@ public class GitSCM extends GitSCMBackwardCompatibility {
                         ? ((Job<?,?>) par).getFullName()
                         : "";
             }
-            return new BuildData(null, getScmName(), getUserRemoteConfigs());
+            return new BuildData(getScmName(), getUserRemoteConfigs());
         } else {
             return base.clone();
         }
@@ -1677,49 +1652,10 @@ public class GitSCM extends GitSCMBackwardCompatibility {
             currBuild = currBuild.getPreviousBuild();
         }
         
-        String projectName;
-        if (build != null) {
-            Job<?,?> job = build.getParent();
-            if (job != null) {
-                projectName = job.getFullName();
-            } else {
-                //Should only happen in tests; as real builds should have a parent
-                projectName = null;
-            }
-        } else {
-            /* Without a build, we can't find out the project it belongs to.
-             * Such buildData is unable to use the global branch-to-build list,
-             * which causes all sorts of issues within this plug-in.
-             */
-            projectName = null;
-        }
-        
         if (buildData == null) {
             return null;
         }
         
-        //Now, we go back through the BuildData fields to fix-up project-name
-        //associations that have been introduced in v1.4.1
-        currBuild = build;
-        if (StringUtils.isEmpty(buildData.projectName)) {
-            buildData.projectName = projectName;
-            //We must re-adjust the project-name bindings or previous builds
-            currBuild = currBuild.getPreviousBuild();
-            while (currBuild != null) {
-                List<BuildData> buildDataList =
-                        currBuild.getActions(BuildData.class);
-                for (BuildData bd : buildDataList) {
-                    if (bd != null) {
-                        //Check if we're done and have found an already fixed one
-                        if (!StringUtils.isEmpty(bd.projectName)) {
-                            currBuild = null;
-                            break;
-                        }
-                        bd.projectName = projectName;
-                    }
-                }
-            }
-        }
         return buildData;
     }
 
